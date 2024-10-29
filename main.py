@@ -1,22 +1,36 @@
 import dataloader
 
 import os
-import json
-from torch.utils.data import Dataset, DataLoader
+import torch
+from torch.utils.data import DataLoader
 
-# Example usage:
+# Assume TradeDataset and custom_collate have been defined as in the previous code
+# Here's the main code that reads the dataset
+
 if __name__ == '__main__':
+    # Set the dataset directory
     current_dir = os.getcwd()
-    dataset_directory = os.path.join(current_dir, 'dataset')  # Corrected line
-    batch_size = 32  # Adjust batch size as needed
+    dataset_directory = os.path.join(current_dir, 'dataset')  # Replace with your dataset path if different
 
-    # Create the dataset and dataloader
-    dataset = dataloader.TradePNLDataset(dataset_directory)
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    # Initialize the dataset
+    dataset = dataloader.TradeDataset(dataset_directory)
+
+    # Create the DataLoader with the custom collate function
+    dataloader = DataLoader(
+        dataset,
+        batch_size=32,        # Adjust batch size as needed
+        shuffle=True,         # Shuffle data at every epoch
+        collate_fn=dataloader.custom_collate  # Use the custom collate function
+    )
 
     # Iterate over the DataLoader
-    for batch_idx, pnl_batch in enumerate(dataloader):
-        # pnl_batch is a tensor containing a batch of pnl values
-        print(f"Batch {batch_idx + 1}:")
-        print(pnl_batch)
-        # Here you can add your training code, e.g., feed pnl_batch into your model
+    for batch_idx, (wallet_addresses, pnls, hold_lengths, holding_percentages) in enumerate(dataloader):
+        print(f"\nBatch {batch_idx + 1}:")
+        print("Wallet Addresses:", wallet_addresses)
+        print("PNLs:", pnls)
+        print("Hold Lengths (minutes):", hold_lengths)
+        print("Holding Percentages:", holding_percentages)
+
+        # Break after one batch for demonstration purposes
+        # Remove this break if you want to process all batches
+        break
