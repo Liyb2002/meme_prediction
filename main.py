@@ -13,7 +13,7 @@ if __name__ == '__main__':
     dataset = dataloader.TradeDataset(dataset_directory)
 
     # Create the DataLoader
-    batch_size = 16  # Adjust as needed
+    batch_size = 32  # Adjust as needed
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -22,12 +22,11 @@ if __name__ == '__main__':
     )
 
     # Iterate over the DataLoader
-    for batch_idx, (wallet_addresses, pnl_padded, hold_length_padded, holding_percentage_padded, seq_lengths) in enumerate(dataloader):
+    for batch_idx, (wallet_addresses, features_padded, labels, seq_lengths) in enumerate(dataloader):
         print(f"Batch {batch_idx + 1}:")
-        print("Wallet Addresses:", len(wallet_addresses))
-        print("PNL shape:", pnl_padded.shape)  # (batch_size, max_num_trades_in_batch)
-        print("Hold Length Hours shape:", hold_length_padded.shape)
-        print("Holding Percentage shape:", holding_percentage_padded.shape)
+        print("Wallet Addresses:", wallet_addresses)
+        print("Features shape:", features_padded.shape)  # (batch_size, max_seq_length, 3)
+        print("Labels:", labels)
         print("Sequence Lengths:", seq_lengths)
-
+        
         break
