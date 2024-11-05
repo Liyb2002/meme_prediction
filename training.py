@@ -46,7 +46,6 @@ def prepare_data(dataset):
         labels_list.append(label)
 
 
-
     features_tensor = torch.tensor(full_data_list)
     labels_tensor = torch.tensor(labels_list, dtype=torch.long)
 
@@ -77,27 +76,21 @@ if __name__ == '__main__':
     val_size = dataset_size - train_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
-    train_addr_to_trades_tensor, train_features, train_labels = prepare_data(train_dataset)
+    train_features, train_labels = prepare_data(train_dataset)
     # Prepare validation data
-    val_addr_to_trades_tensor, val_features, val_labels = prepare_data(val_dataset)
+    val_features, val_labels = prepare_data(val_dataset)
 
     # Move data to device
     train_features = train_features.to(device)
     train_labels = train_labels.to(device)
-    train_addr_to_trades_tensor = train_addr_to_trades_tensor.to(device)
 
     val_features = val_features.to(device)
     val_labels = val_labels.to(device)
-    val_addr_to_trades_tensor = val_addr_to_trades_tensor.to(device)
 
-
-    print("train_addr_to_trades_tensor", train_addr_to_trades_tensor.shape)
-    print("train_features", train_features.shape)
-    print("train_labels", train_labels.shape)
 
     # Create TensorDatasets
-    train_tensor_dataset = TensorDataset(train_addr_to_trades_tensor, train_features, train_labels)
-    val_tensor_dataset = TensorDataset(val_addr_to_trades_tensor, val_features, val_labels)
+    train_tensor_dataset = TensorDataset( train_features, train_labels)
+    val_tensor_dataset = TensorDataset(val_features, val_labels)
 
     # Create DataLoaders
     batch_size = 32  # Adjust as needed
@@ -105,12 +98,12 @@ if __name__ == '__main__':
     val_loader = DataLoader(val_tensor_dataset, batch_size=batch_size, shuffle=False)
 
 
-    state_embedding_model = model.StateEmbeddingNetwork(input_size, hidden_size, num_classes).to(device)
+    state_embedding_model = model.StateEmbeddingNetwork().to(device)
     user_embedding_model = model.UserEmbeddingNetwork().to(device)
 
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(list(state_embedding_model.parameters()) + list(user_embedding_model.parameters()), lr=0.001)
 
     current_dir = os.getcwd()
     save_dir = os.path.join(current_dir, 'checkpoints')
@@ -120,10 +113,28 @@ if __name__ == '__main__':
     num_epochs = 30
     best_val_loss = 100
     for epoch in range(num_epochs):
-        model.train()
+        state_embedding_model.train()
+        user_embedding_model.train()
+
         total_train_loss = 0
-        for train_addr_to_trades_tensor, features, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Training"):
+        for features, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Training"):
             optimizer.zero_grad()
+
+            print("features", features.shape)
+            print('labels', labels.shape)
+
+
+
+
+
+
+
+
+
+
+
+
+
 
             # Forward pass
             user_embedding = user_embedding_model(train_addr_to_trades_tensor)

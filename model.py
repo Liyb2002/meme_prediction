@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 class StateEmbeddingNetwork(nn.Module):
-    def __init__(self, state_feature_size, state_embedding_size):
+    def __init__(self, state_feature_size = 3, state_embedding_size = 8):
         super(StateEmbeddingNetwork, self).__init__()
         self.fc = nn.Sequential(
             nn.Linear(state_feature_size, state_embedding_size),
