@@ -14,6 +14,7 @@ class TradeDataset(Dataset):
         """
         Loads data from JSON files in the specified directory.
         For each 'sell' data point, generates a 'hold' data point.
+        Each data point is an individual state.
         """
         for filename in os.listdir(dataset_directory):
             if filename.endswith('.json'):
@@ -33,10 +34,6 @@ class TradeDataset(Dataset):
                     if scaling_factor is None:
                         continue  # Skip if scaling factor couldn't be determined
 
-                    pnl_list = []
-                    hold_length_list = []
-                    holding_percentage_list = []
-
                     for trade in trades:
                         # Extract variables
                         pnl = trade.get('pnl')
@@ -50,41 +47,28 @@ class TradeDataset(Dataset):
                         if hold_length_hours is None:
                             continue  # Skip if hold_length couldn't be parsed
 
-                        # Append original 'sell' data
-                        pnl_list.append(float(pnl))
-                        hold_length_list.append(float(hold_length_hours))
-                        holding_percentage_list.append(float(holding_percentage))
+                        # Create 'sell' data point
+                        sell_data = {
+                            'wallet_address': wallet_address,
+                            'pnl': float(pnl),
+                            'hold_length_hours': float(hold_length_hours),
+                            'holding_percentage': float(holding_percentage),
+                            'label': 1  # 'sell' label
+                        }
+                        self.data.append(sell_data)
 
-                    if not pnl_list:
-                        continue  # Skip if no valid trades found
+                        # Generate 'hold' data point using the scaling factor and new calculations
+                        scaled_hold_length_factor = (scaling_factor * 2) % 1
+                        scaled_holding_percentage_factor = (scaling_factor * 4) % 1
 
-                    # Create 'sell' data point
-                    sell_data = {
-                        'wallet_address': wallet_address,
-                        'pnl': pnl_list,
-                        'hold_length_hours': hold_length_list,
-                        'holding_percentage': holding_percentage_list,
-                        'label': 1  # 'sell' label
-                    }
-                    self.data.append(sell_data)
-
-                    # Generate 'hold' data point using the scaling factors
-                    scaling_factor_pnl = scaling_factor
-                    scaling_factor_hold_length = (scaling_factor * 2) % 1
-                    scaling_factor_holding_percentage = (scaling_factor * 4) % 1
-
-                    hold_pnl_list = [p * scaling_factor_pnl for p in pnl_list]
-                    hold_hold_length_list = [h * scaling_factor_hold_length for h in hold_length_list]
-                    hold_holding_percentage_list = [hp * scaling_factor_holding_percentage for hp in holding_percentage_list]
-
-                    hold_data = {
-                        'wallet_address': wallet_address,
-                        'pnl': hold_pnl_list,
-                        'hold_length_hours': hold_hold_length_list,
-                        'holding_percentage': hold_holding_percentage_list,
-                        'label': 0  # 'hold' label
-                    }
-                    self.data.append(hold_data)
+                        hold_data = {
+                            'wallet_address': wallet_address,
+                            'pnl': float(pnl) * scaling_factor,
+                            'hold_length_hours': float(hold_length_hours) * scaled_hold_length_factor,
+                            'holding_percentage': float(holding_percentage) * scaled_holding_percentage_factor,
+                            'label': 0  # 'hold' label
+                        }
+                        self.data.append(hold_data)
 
     def find_random(self, wallet_address):
         """
@@ -143,14 +127,15 @@ class TradeDataset(Dataset):
     def __getitem__(self, idx):
         """
         Returns the data point at the specified index.
+        Each data point is an individual state.
         """
         item = self.data[idx]
-        wallet_address = item['wallet_address']
+        # Since wallet_address is not a feature, we can ignore it or return it for reference
         pnl = torch.tensor(item['pnl'], dtype=torch.float32)
         hold_length_hours = torch.tensor(item['hold_length_hours'], dtype=torch.float32)
         holding_percentage = torch.tensor(item['holding_percentage'], dtype=torch.float32)
         label = torch.tensor(item['label'], dtype=torch.long)  # Use long for classification labels
-        return wallet_address, pnl, hold_length_hours, holding_percentage, label
+        return pnl, hold_length_hours, holding_percentage, label
 
 
 
@@ -159,51 +144,16 @@ class TradeDataset(Dataset):
 
 def custom_collate_fn(batch):
     """
-    Custom collate function to batch data with variable-length sequences.
-    Handles padding of sequences.
-
-    Args:
-        batch: List of tuples returned by __getitem__:
-            - wallet_address: str
-            - pnl: Tensor of shape (sequence_length,)
-            - hold_length_hours: Tensor of shape (sequence_length,)
-            - holding_percentage: Tensor of shape (sequence_length,)
-            - label: Tensor of shape ()
-
-    Returns:
-        batch_wallet_addresses: List[str]
-        batch_features_padded: Tensor of shape (batch_size, max_seq_length, 3)
-        batch_labels: Tensor of shape (batch_size,)
-        seq_lengths: Tensor of shape (batch_size,)
+    Custom collate function to batch data points.
+    Each data point is a tuple of (pnl, hold_length_hours, holding_percentage, label).
     """
-    batch_wallet_addresses = [item[0] for item in batch]
-    pnl_list = [item[1] for item in batch]
-    hold_length_list = [item[2] for item in batch]
-    holding_percentage_list = [item[3] for item in batch]
-    batch_labels = torch.stack([item[4] for item in batch])
-
-    # Get sequence lengths
-    seq_lengths = torch.tensor([len(pnl) for pnl in pnl_list], dtype=torch.long)
-
-    # Handle empty sequences
-    for i in range(len(pnl_list)):
-        if seq_lengths[i] == 0:
-            # Replace empty sequences with a tensor containing a single zero
-            pnl_list[i] = torch.tensor([0.0], dtype=torch.float32)
-            hold_length_list[i] = torch.tensor([0.0], dtype=torch.float32)
-            holding_percentage_list[i] = torch.tensor([0.0], dtype=torch.float32)
-            seq_lengths[i] = 1  # Update sequence length
-
-    # Pad sequences
-    batch_pnl_padded = pad_sequence(pnl_list, batch_first=True, padding_value=0.0)
-    batch_hold_length_padded = pad_sequence(hold_length_list, batch_first=True, padding_value=0.0)
-    batch_holding_percentage_padded = pad_sequence(holding_percentage_list, batch_first=True, padding_value=0.0)
+    pnl_list = torch.tensor([item[0] for item in batch], dtype=torch.float32)
+    hold_length_list = torch.tensor([item[1] for item in batch], dtype=torch.float32)
+    holding_percentage_list = torch.tensor([item[2] for item in batch], dtype=torch.float32)
+    labels_tensor = torch.tensor([item[3] for item in batch], dtype=torch.long)
 
     # Stack features into a single tensor
-    batch_features_padded = torch.stack(
-        [batch_pnl_padded, batch_hold_length_padded, batch_holding_percentage_padded], dim=2
-    )
-    # batch_features_padded shape: (batch_size, max_seq_length, 3)
+    features_tensor = torch.stack([pnl_list, hold_length_list, holding_percentage_list], dim=1)
+    # features_tensor shape: (batch_size, 3)
 
-    return batch_wallet_addresses, batch_features_padded, batch_labels, seq_lengths
-
+    return features_tensor, labels_tensor
