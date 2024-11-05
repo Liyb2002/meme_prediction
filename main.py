@@ -1,4 +1,4 @@
-import dataloader
+import meme_dataloader 
 
 import os
 import torch
@@ -10,7 +10,7 @@ if __name__ == '__main__':
     dataset_directory = os.path.join(current_dir, 'dataset')  # Replace with your dataset path
 
     # Initialize the dataset
-    dataset = dataloader.TradeDataset(dataset_directory)
+    dataset = meme_dataloader.TradeDataset(dataset_directory)
 
     # Create the DataLoader
     batch_size = 32  # Adjust as needed
@@ -18,7 +18,7 @@ if __name__ == '__main__':
         dataset,
         batch_size=batch_size,
         shuffle=True,
-        collate_fn=dataloader.custom_collate_fn
+        collate_fn=meme_dataloader.custom_collate_fn
     )
 
     # Iterate over the DataLoader
