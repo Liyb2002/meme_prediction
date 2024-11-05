@@ -131,11 +131,12 @@ class TradeDataset(Dataset):
         """
         item = self.data[idx]
         # Since wallet_address is not a feature, we can ignore it or return it for reference
+        addr = item['wallet_address'][:6]
         pnl = torch.tensor(item['pnl'], dtype=torch.float32)
         hold_length_hours = torch.tensor(item['hold_length_hours'], dtype=torch.float32)
         holding_percentage = torch.tensor(item['holding_percentage'], dtype=torch.float32)
         label = torch.tensor(item['label'], dtype=torch.long)  # Use long for classification labels
-        return pnl, hold_length_hours, holding_percentage, label
+        return addr, pnl, hold_length_hours, holding_percentage, label
 
 
 

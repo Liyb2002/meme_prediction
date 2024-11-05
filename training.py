@@ -1,6 +1,7 @@
 import meme_dataloader 
 import model
 from config import device, input_size, hidden_size, num_classes
+import helper
 
 import os
 import torch
@@ -11,25 +12,43 @@ from tqdm import tqdm
 
 
 def prepare_data(dataset):
-    pnl_list = []
-    hold_length_list = []
-    holding_percentage_list = []
+
+    # For user_embedding
+    addr_to_trades = {}
+    for idx in tqdm(range(len(dataset)), desc=f"Preparing Data - User Embedding"):
+        addr, pnl, hold_length_hours, holding_percentage, label = dataset[idx]
+        if label == 0:
+            continue
+
+        if addr not in addr_to_trades:
+            addr_to_trades[addr] = []
+        
+        addr_to_trades[addr].append(pnl.item())
+        addr_to_trades[addr].append(hold_length_hours.item())
+        addr_to_trades[addr].append(holding_percentage.item())
+        addr_to_trades[addr].append(0)
+
+    addr_to_trades = helper.padd_trade_map(addr_to_trades)
+
+
+    full_data_list = []
     labels_list = []
-    for idx in tqdm(range(len(dataset)), desc=f"Preparing Data"):
-        pnl, hold_length_hours, holding_percentage, label = dataset[idx]
-        pnl_list.append(pnl)
-        hold_length_list.append(hold_length_hours)
-        holding_percentage_list.append(holding_percentage)
+
+    for idx in tqdm(range(len(dataset)), desc=f"Preparing Data - Logic Model"):
+        addr, pnl, hold_length_hours, holding_percentage, label = dataset[idx]
+        if addr not in addr_to_trades:
+            continue
+        
+        user_embedding = addr_to_trades[addr]
+        full_data = user_embedding + [pnl.item(), hold_length_hours.item(), holding_percentage.item()]
+
+        full_data_list.append(full_data)
         labels_list.append(label)
 
-    # Stack features and labels
-    pnl_tensor = torch.stack(pnl_list)
-    hold_length_tensor = torch.stack(hold_length_list)
-    holding_percentage_tensor = torch.stack(holding_percentage_list)
-    labels_tensor = torch.stack(labels_list)
 
-    # Create the input feature tensor
-    features_tensor = torch.stack([pnl_tensor, hold_length_tensor, holding_percentage_tensor], dim=1)
+
+    features_tensor = torch.tensor(full_data_list)
+    labels_tensor = torch.tensor(labels_list, dtype=torch.long)
 
     return features_tensor, labels_tensor
 
@@ -58,19 +77,27 @@ if __name__ == '__main__':
     val_size = dataset_size - train_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
-    train_features, train_labels = prepare_data(train_dataset)
+    train_addr_to_trades_tensor, train_features, train_labels = prepare_data(train_dataset)
     # Prepare validation data
-    val_features, val_labels = prepare_data(val_dataset)
+    val_addr_to_trades_tensor, val_features, val_labels = prepare_data(val_dataset)
 
     # Move data to device
     train_features = train_features.to(device)
     train_labels = train_labels.to(device)
+    train_addr_to_trades_tensor = train_addr_to_trades_tensor.to(device)
+
     val_features = val_features.to(device)
     val_labels = val_labels.to(device)
+    val_addr_to_trades_tensor = val_addr_to_trades_tensor.to(device)
+
+
+    print("train_addr_to_trades_tensor", train_addr_to_trades_tensor.shape)
+    print("train_features", train_features.shape)
+    print("train_labels", train_labels.shape)
 
     # Create TensorDatasets
-    train_tensor_dataset = TensorDataset(train_features, train_labels)
-    val_tensor_dataset = TensorDataset(val_features, val_labels)
+    train_tensor_dataset = TensorDataset(train_addr_to_trades_tensor, train_features, train_labels)
+    val_tensor_dataset = TensorDataset(val_addr_to_trades_tensor, val_features, val_labels)
 
     # Create DataLoaders
     batch_size = 32  # Adjust as needed
@@ -78,7 +105,10 @@ if __name__ == '__main__':
     val_loader = DataLoader(val_tensor_dataset, batch_size=batch_size, shuffle=False)
 
 
-    model = model.TradeClassifier(input_size, hidden_size, num_classes).to(device)
+    state_embedding_model = model.StateEmbeddingNetwork(input_size, hidden_size, num_classes).to(device)
+    user_embedding_model = model.UserEmbeddingNetwork().to(device)
+
+
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
@@ -92,11 +122,15 @@ if __name__ == '__main__':
     for epoch in range(num_epochs):
         model.train()
         total_train_loss = 0
-        for features, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Training"):
+        for train_addr_to_trades_tensor, features, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Training"):
             optimizer.zero_grad()
 
             # Forward pass
-            outputs = model(features)
+            user_embedding = user_embedding_model(train_addr_to_trades_tensor)
+
+            print("user_embedding", user_embedding.shape)
+            state_embedding = state_embedding_model(features)
+            print("state_embedding", state_embedding.shape)
 
             # Compute loss
             loss = criterion(outputs, labels)
@@ -116,7 +150,7 @@ if __name__ == '__main__':
         total_predictions = 0
 
         with torch.no_grad():
-            for features, labels in tqdm(val_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Validation"):
+            for val_addr_to_trades_tensor, features, labels in tqdm(val_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Validation"):
                 # features: Tensor of shape (batch_size, 3)
                 # labels: Tensor of shape (batch_size,)
 
