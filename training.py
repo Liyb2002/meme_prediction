@@ -1,6 +1,6 @@
 import meme_dataloader 
 import model
-from config import device
+from config import device, input_size, hidden_size, num_classes
 
 import os
 import torch
@@ -37,6 +37,8 @@ def prepare_data(dataset):
 
 def load_models(model, save_dir):
     model.load_state_dict(torch.load(os.path.join(save_dir, 'model.pth')))
+    model.to(device)
+    model.eval
 
 
 def save_models(model, save_dir):
@@ -76,10 +78,6 @@ if __name__ == '__main__':
     val_loader = DataLoader(val_tensor_dataset, batch_size=batch_size, shuffle=False)
 
 
-    input_size = 3  # Number of input features (pnl, hold_length_hours, holding_percentage)
-    hidden_size = 64  # Adjust as needed
-    num_classes = 2  # 'sell' or 'hold'
-
     model = model.TradeClassifier(input_size, hidden_size, num_classes).to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
@@ -89,7 +87,7 @@ if __name__ == '__main__':
     os.makedirs(save_dir, exist_ok=True)
 
 
-    num_epochs = 100
+    num_epochs = 30
     best_val_loss = 100
     for epoch in range(num_epochs):
         model.train()

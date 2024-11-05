@@ -7,4 +7,6 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # ---------------------------------------------------------------------------- #
 
-operation_to_index = {'terminate': 0, 'sketch': 1, 'extrude_addition': 2, 'extrude_subtraction': 3, 'fillet': 4}
+input_size = 3  # Number of input features (pnl, hold_length_hours, holding_percentage)
+hidden_size = 64
+num_classes = 2  # 'sell' or 'hold'
