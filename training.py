@@ -17,8 +17,9 @@ def prepare_data(dataset):
     addr_to_trades = {}
     for idx in tqdm(range(len(dataset)), desc=f"Preparing Data - User Embedding"):
         addr, pnl, hold_length_hours, holding_percentage, label = dataset[idx]
-        if label == 0:
-            continue
+        # Remove this line to include all labels
+        # if label == 0:
+        #     continue
 
         if addr not in addr_to_trades:
             addr_to_trades[addr] = []
@@ -26,10 +27,10 @@ def prepare_data(dataset):
         addr_to_trades[addr].append(pnl.item())
         addr_to_trades[addr].append(hold_length_hours.item())
         addr_to_trades[addr].append(holding_percentage.item())
-        addr_to_trades[addr].append(0)
+        addr_to_trades[addr].append(0)  # You can adjust this if needed
 
+    # Pad or process addr_to_trades as required
     addr_to_trades = helper.padd_trade_map(addr_to_trades)
-
 
     full_data_list = []
     labels_list = []
@@ -43,24 +44,52 @@ def prepare_data(dataset):
         full_data = user_embedding + [pnl.item(), hold_length_hours.item(), holding_percentage.item()]
 
         full_data_list.append(full_data)
-        labels_list.append(label)
+        labels_list.append(float(label))  # Ensure labels are floats (0.0 or 1.0)
 
-
-    features_tensor = torch.tensor(full_data_list)
-    labels_tensor = torch.tensor(labels_list, dtype=torch.long)
+    features_tensor = torch.tensor(full_data_list, dtype=torch.float32)
+    labels_tensor = torch.tensor(labels_list, dtype=torch.float32)  # Use torch.float32
 
     return features_tensor, labels_tensor
 
 
 
-def load_models(model, save_dir):
-    model.load_state_dict(torch.load(os.path.join(save_dir, 'model.pth')))
-    model.to(device)
-    model.eval
+def compute_accuracy(logits, labels):
+    probabilities = torch.sigmoid(logits)  # Shape: (batch_size, 1) or (batch_size,)
+
+    predictions = (probabilities >= 0.5).float()  # Shape: (batch_size, 1) or (batch_size,)
+
+    predictions = predictions.view(-1)  # Shape: (batch_size,)
+    labels = labels.view(-1)  # Shape: (batch_size,)
+
+    # Compute number of correct predictions
+    correct_predictions = (predictions == labels).sum().item()
+
+    # Total number of samples in the batch
+    total_in_batch = labels.size(0)
+
+    return total_in_batch, correct_predictions
 
 
-def save_models(model, save_dir):
-    torch.save(model.state_dict(), os.path.join(save_dir, 'model.pth'))
+
+
+def load_models(state_embedding_model, user_embedding_model, cross_attention_model, save_dir):
+    state_embedding_model.load_state_dict(torch.load(os.path.join(state_embedding_model, 'state_embedding_model.pth')))
+    state_embedding_model.to(device)
+    state_embedding_model.eval()
+
+    user_embedding_model.load_state_dict(torch.load(os.path.join(user_embedding_model, 'user_embedding_model.pth')))
+    user_embedding_model.to(device)
+    user_embedding_model.eval()
+
+    cross_attention_model.load_state_dict(torch.load(os.path.join(cross_attention_model, 'cross_attention_model.pth')))
+    cross_attention_model.to(device)
+    cross_attention_model.eval()
+
+
+def save_models(state_embedding_model, user_embedding_model, cross_attention_model, save_dir):
+    torch.save(state_embedding_model.state_dict(), os.path.join(save_dir, 'state_embedding_model.pth'))
+    torch.save(user_embedding_model.state_dict(), os.path.join(save_dir, 'user_embedding_model.pth'))
+    torch.save(cross_attention_model.state_dict(), os.path.join(save_dir, 'cross_attention_model.pth'))
 
 
 
@@ -100,9 +129,9 @@ if __name__ == '__main__':
 
     state_embedding_model = model.StateEmbeddingNetwork().to(device)
     user_embedding_model = model.UserEmbeddingNetwork().to(device)
+    cross_attention_model = model.UserStateCrossAttentionModel().to(device)
 
-
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(list(state_embedding_model.parameters()) + list(user_embedding_model.parameters()), lr=0.001)
 
     current_dir = os.getcwd()
@@ -117,34 +146,30 @@ if __name__ == '__main__':
         user_embedding_model.train()
 
         total_train_loss = 0
+
+        train_total_correct = 0
+        train_total_samples = 0
+
         for features, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Training"):
             optimizer.zero_grad()
 
-            print("features", features.shape)
-            print('labels', labels.shape)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-            # Forward pass
-            user_embedding = user_embedding_model(train_addr_to_trades_tensor)
-
-            print("user_embedding", user_embedding.shape)
+            user_embedding = user_embedding_model(features)
             state_embedding = state_embedding_model(features)
-            print("state_embedding", state_embedding.shape)
+
+            # print("user_embedding", user_embedding.shape)
+            # print("state_embedding", state_embedding.shape)
+
+            logits = cross_attention_model(state_embedding, user_embedding)
+            # print("logits", logits.shape)
+            # print("labels", labels.shape)
+
 
             # Compute loss
-            loss = criterion(outputs, labels)
+            loss = criterion(logits.squeeze(), labels)  # Squeeze logits to match labels shape
+
+            total_in_batch, correct_predictions = compute_accuracy(logits, labels)
+            train_total_correct += correct_predictions
+            train_total_samples += total_in_batch
 
             # Backward pass and optimization
             loss.backward()
@@ -153,39 +178,42 @@ if __name__ == '__main__':
             total_train_loss += loss.item()
 
         average_train_loss = total_train_loss / len(train_loader)
+        accuracy = train_total_correct / train_total_samples
+        print(f"Epoch {epoch+1}/{num_epochs}, Training Accuracy: {accuracy:.4f}")
 
         # Validation phase
-        model.eval()
+        state_embedding_model.eval()
+        user_embedding_model.eval()
+        cross_attention_model.eval()
+
         total_val_loss = 0
-        correct_predictions = 0
-        total_predictions = 0
+        val_total_correct = 0
+        val_total_samples = 0
 
         with torch.no_grad():
-            for val_addr_to_trades_tensor, features, labels in tqdm(val_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Validation"):
-                # features: Tensor of shape (batch_size, 3)
-                # labels: Tensor of shape (batch_size,)
+            for features, labels in tqdm(val_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Validation"):
 
                 # Forward pass
-                outputs = model(features)
+                user_embedding = user_embedding_model(features)
+                state_embedding = state_embedding_model(features)
+                logits = cross_attention_model(state_embedding, user_embedding)
+
 
                 # Compute loss
-                loss = criterion(outputs, labels)
-                total_val_loss += loss.item()
+                loss = criterion(logits.squeeze(), labels)  # Squeeze logits to match labels shape
 
-                # Compute accuracy
-                _, predicted = torch.max(outputs.data, 1)
-                total_predictions += labels.size(0)
-                correct_predictions += (predicted == labels).sum().item()
+                total_in_batch, correct_predictions = compute_accuracy(logits, labels)
+                val_total_correct += correct_predictions
+                val_total_samples += total_in_batch
 
         average_val_loss = total_val_loss / len(val_loader)
-        val_accuracy = correct_predictions / total_predictions
+        val_accuracy = val_total_correct / val_total_samples
 
         print(f'Epoch [{epoch+1}/{num_epochs}], '
-              f'Train Loss: {average_train_loss:.4f}, '
               f'Val Loss: {average_val_loss:.4f}, '
               f'Val Accuracy: {val_accuracy:.4f}')
         
         if average_val_loss < best_val_loss:
             best_val_loss = average_val_loss
-            save_models(model, save_dir)
+            save_models(state_embedding_model, user_embedding_model, cross_attention_model, save_dir)
             print("save model!")
