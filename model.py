@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch.optim as optim
+import torch
 
 class StateEmbeddingNetwork(nn.Module):
     def __init__(self, input_size=3, embedding_size=16):
@@ -49,7 +50,7 @@ class UserEmbeddingNetwork(nn.Module):
 
 
 class UserStateCrossAttentionModel(nn.Module):
-    def __init__(self, query_dim=16, key_value_dim=32, num_heads=1, hidden_size=64):
+    def __init__(self, query_dim=16, key_value_dim=32, num_heads=4, hidden_size=64):
         super(UserStateCrossAttentionModel, self).__init__()
         # Projection layers for query, key, and value
         self.query_proj = nn.Linear(query_dim, key_value_dim)
@@ -65,15 +66,16 @@ class UserStateCrossAttentionModel(nn.Module):
         
         # Decoder (classifier) for binary prediction
         self.decoder = nn.Sequential(
-            nn.Linear(key_value_dim, hidden_size),
+            nn.Linear(key_value_dim + query_dim, hidden_size),  # Updated input dimension
             nn.ReLU(),
-            nn.Linear(hidden_size, 1)  # Single output neuron for binary classification
+            nn.Linear(hidden_size, 1)
         )
     
     def forward(self, state_embedding, user_embedding):
         """
         Performs cross-attention between state_embedding and user_embedding,
-        and decodes the attention output to produce a binary prediction.
+        concatenates the attention output with state_embedding,
+        and decodes the result to produce a binary prediction.
 
         Args:
             state_embedding (Tensor): Tensor of shape (batch_size, query_dim).
@@ -95,7 +97,10 @@ class UserStateCrossAttentionModel(nn.Module):
         # Remove the sequence dimension
         attn_output = attn_output.squeeze(1)  # Shape: (batch_size, key_value_dim)
 
-        # Pass through the decoder to get logits
-        logits = self.decoder(attn_output)  # Shape: (batch_size, 1)
+        # Concatenate attention output with state_embedding
+        combined = torch.cat((attn_output, state_embedding), dim=1)  # Shape: (batch_size, key_value_dim + query_dim)
 
-        return logits  # Logits suitable for nn.BCEWithLogitsLoss
+        # Pass through the decoder to get logits
+        logits = self.decoder(combined)  # Shape: (batch_size, 1)
+
+        return logits
